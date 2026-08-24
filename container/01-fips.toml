@@ -1,0 +1,3 @@
+# bootc kernel arguments — enable FIPS at every boot
+# Placed in /usr/lib/bootc/kargs.d/ during image build
+kargs = ["fips=1"]

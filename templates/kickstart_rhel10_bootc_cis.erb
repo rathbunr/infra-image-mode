@@ -1,0 +1,97 @@
+<%#
+kind: provision
+name: Kickstart RHEL10 bootc CIS FIPS
+model: ProvisioningTemplate
+oses:
+- RedHat
+description: Image Mode (bootc) provision template — no %packages; uses ostreecontainer.
+  Injects registry auth.json in %pre for private registries. Expects host parameter
+  ostreecontainer (full image URL) and optional registry_auth_b64 (auth field value).
+-%>
+<%
+  ostree_url = host_param('ostreecontainer') || @host.params['ostreecontainer']
+  registry_auth = host_param('registry_auth_b64') || @host.params['registry_auth_b64']
+  registry_host = host_param('registry_host') || (ostree_url.to_s.split('/')[0] rescue '')
+-%>
+# Generated from Satellite template "<%= @template_name %>" for <%= @host.name %>
+# Image mode: container image replaces traditional package install.
+
+lang <%= host_param('lang') || 'en_US.UTF-8' %>
+keyboard <%= host_param('keyboard') || 'us' %>
+timezone <%= host_param('time-zone') || 'UTC' %> --utc
+selinux --<%= host_param('selinux-mode') || 'enforcing' %>
+
+# Network (required to pull container and phone home to Satellite)
+<%
+  @host.interfaces.reject { |iface| iface.bmc? }.sort_by { |iface|
+    (iface.bond? || iface.bridge?) ? 0 : iface.provision? ? 20 : 10
+  }.each do |iface|
+-%>
+<%= snippet('kickstart_network_interface',
+      variables: { iface: iface, host: @host, static: @static, static6: @static6 }) -%>
+<% end -%>
+
+# Storage — adjust to site standard (LVs, LUKS+Clevis optional in image)
+zerombr
+clearpart --all --initlabel --disklabel=gpt
+reqpart --add-boot
+part / --fstype="xfs" --grow
+
+# ---------------------------------------------------------------------------
+# NO %packages — image mode installs the OCI bootc image instead
+# ---------------------------------------------------------------------------
+ostreecontainer --url <%= ostree_url %>
+
+# Access: prefer SSH keys / IdM; lock root if desired
+rootpw --iscrypted <%= root_pass %>
+<% if host_param('sshkey_root') -%>
+sshkey --username root "<%= host_param('sshkey_root') %>"
+<% end -%>
+
+services --enabled=sshd,pcscd.socket
+firewall --enabled --service=ssh
+
+reboot
+
+# ---------------------------------------------------------------------------
+# %pre: inject registry credentials so Anaconda/bootc can pull a private image
+# Auth format: containers-auth.json(5) — "auth" is base64(user:token)
+# Satellite stores registry_auth_b64 as a hidden host/group parameter.
+# ---------------------------------------------------------------------------
+%pre --log=/root/ks-pre-bootc.log
+#!/bin/bash
+set -euo pipefail
+mkdir -p /etc/ostree
+<% if registry_auth.to_s.strip != '' -%>
+cat > /etc/ostree/auth.json << 'EOF'
+{
+  "auths": {
+    "<%= registry_host %>": {
+      "auth": "<%= registry_auth %>"
+    }
+  }
+}
+EOF
+chmod 0600 /etc/ostree/auth.json
+<% else -%>
+# No registry_auth_b64 host parameter — assuming unauthenticated pull or
+# credentials already present in the installation environment.
+echo "{}" > /etc/ostree/auth.json
+<% end -%>
+%end
+
+# ---------------------------------------------------------------------------
+# %post: ensure auth persists on deployed system for bootc upgrades
+# ---------------------------------------------------------------------------
+%post --log=/root/ks-post-bootc.log
+#!/bin/bash
+set -euo pipefail
+mkdir -p /etc/ostree
+if [ -f /etc/ostree/auth.json ]; then
+  chmod 0600 /etc/ostree/auth.json
+fi
+# FIPS already baked into image (kargs + crypto policy); verify marker
+if [ -f /proc/sys/crypto/fips_enabled ]; then
+  echo "fips_enabled=$(cat /proc/sys/crypto/fips_enabled)" >> /root/ks-post-bootc.log
+fi
+%end

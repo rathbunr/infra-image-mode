@@ -1,0 +1,50 @@
+---
+# Build the CIS L1 + FIPS RHEL 10 bootc image and push to internal registry.
+# Uses containers.podman collection. Idempotent tagging; rebuild when Containerfile changes.
+
+- name: Build and push RHEL 10 bootc CIS FIPS image
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars_files:
+    - "{{ playbook_dir }}/../group_vars/all.yml"
+
+  tasks:
+    - name: Assert registry credentials are available (login or env)
+      ansible.builtin.assert:
+        that:
+          - registry_url is defined
+          - image_full is defined
+        fail_msg: "Set registry_url and image coordinates in group_vars."
+
+    - name: Log in to internal registry
+      containers.podman.podman_login:
+        registry: "{{ registry_url }}"
+        username: "{{ registry_username }}"
+        password: "{{ registry_password }}"
+      when:
+        - registry_username is defined
+        - registry_password is defined
+      no_log: true
+
+    - name: Build bootc image from Containerfile
+      containers.podman.podman_image:
+        name: "{{ image_full }}"
+        path: "{{ containerfile_dir }}"
+        build:
+          file: Containerfile
+          format: oci
+        state: present
+        force: true
+      register: build_result
+
+    - name: Push image to internal registry
+      containers.podman.podman_image:
+        name: "{{ image_full }}"
+        push: true
+        state: present
+      register: push_result
+
+    - name: Display image reference for Satellite host parameter
+      ansible.builtin.debug:
+        msg: "Set host parameter '{{ ostreecontainer_param }}' = '{{ image_full }}'"

@@ -1,0 +1,8 @@
+---
+collections:
+  - name: containers.podman
+    version: ">=1.14.0"
+  - name: redhat.satellite
+    version: ">=5.0.0"
+  - name: community.general
+    version: ">=9.0.0"

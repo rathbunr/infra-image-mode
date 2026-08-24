@@ -1,0 +1,8 @@
+---
+# Full pipeline: build/push bootc image → configure Satellite
+# Usage:
+#   ansible-playbook -i inventory/hosts.yml playbooks/site.yml \
+#     -e @files/vault.yml --ask-vault-pass
+
+- import_playbook: 01-build-push-image.yml
+- import_playbook: 02-configure-satellite.yml

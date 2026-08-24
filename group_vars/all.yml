@@ -1,0 +1,41 @@
+---
+# --- Registry & image ---
+registry_url: "registry.internal.example.com"
+registry_namespace: "rhel10-bootc"
+image_name: "rhel10-cis-l1-fips"
+image_tag: "1.0"
+image_full: "{{ registry_url }}/{{ registry_namespace }}/{{ image_name }}:{{ image_tag }}"
+
+# Build context
+containerfile_dir: "{{ playbook_dir }}/../container"
+# registry credentials: use Podman auth or vault vars
+# registry_username / registry_password from vault
+
+# --- Satellite ---
+satellite_server_url: "https://satellite.example.com"
+satellite_username: "admin"
+# satellite_password from vault
+satellite_validate_certs: true
+satellite_organization: "EXAMPLE"
+satellite_location: "Datacenter"
+
+# Provisioning template
+pt_name: "Kickstart RHEL10 bootc CIS FIPS"
+pt_kind: "provision"
+
+# OS / architecture objects
+os_title: "RedHat"
+os_major: 10
+os_minor: 2
+os_name: "RedHat 10.2"
+architecture: "x86_64"
+
+# Host group
+hostgroup_name: "RHEL 10 bootc CIS L1 FIPS"
+# Host parameter that Kickstart template reads for the container URL
+ostreecontainer_param: "ostreecontainer"
+
+# Registry auth for Kickstart %pre (base64 of user:token or pull secret fragment)
+# Prefer Satellite smart-class / host parameter with hidden value, or inject via
+# a short-lived token. Example structure matches containers-auth.json(5).
+# registry_auth_b64: from vault — value of the "auth" field only

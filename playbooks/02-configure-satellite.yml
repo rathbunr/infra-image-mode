@@ -1,0 +1,105 @@
+---
+# Configure Satellite for RHEL 10 bootc CIS image-mode provisioning:
+# - Operating system + architecture
+# - Provisioning template (Kickstart bootc)
+# - Host group with ostreecontainer parameter
+#
+# Template body is uploaded from templates/kickstart_rhel10_bootc_cis.erb
+
+- name: Configure Satellite for RHEL 10 bootc CIS provisioning
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars_files:
+    - "{{ playbook_dir }}/../group_vars/all.yml"
+
+  tasks:
+    - name: Ensure x86_64 architecture exists
+      redhat.satellite.architecture:
+        server_url: "{{ satellite_server_url }}"
+        username: "{{ satellite_username }}"
+        password: "{{ satellite_password }}"
+        validate_certs: "{{ satellite_validate_certs }}"
+        name: "{{ architecture }}"
+        state: present
+      no_log: true
+
+    - name: Ensure RHEL 10 operating system exists
+      redhat.satellite.operatingsystem:
+        server_url: "{{ satellite_server_url }}"
+        username: "{{ satellite_username }}"
+        password: "{{ satellite_password }}"
+        validate_certs: "{{ satellite_validate_certs }}"
+        name: "{{ os_title }}"
+        major: "{{ os_major }}"
+        minor: "{{ os_minor }}"
+        family: "Redhat"
+        architectures:
+          - "{{ architecture }}"
+        password_hash: "sha512"
+        state: present
+      no_log: true
+
+    - name: Load Kickstart bootc provisioning template from disk
+      ansible.builtin.slurp:
+        src: "{{ playbook_dir }}/../templates/kickstart_rhel10_bootc_cis.erb"
+      register: ks_template_b64
+
+    - name: Upload / update Provisioning Template
+      redhat.satellite.provisioning_template:
+        server_url: "{{ satellite_server_url }}"
+        username: "{{ satellite_username }}"
+        password: "{{ satellite_password }}"
+        validate_certs: "{{ satellite_validate_certs }}"
+        name: "{{ pt_name }}"
+        template: "{{ ks_template_b64.content | b64decode }}"
+        kind: "{{ pt_kind }}"
+        operatingsystems:
+          - "{{ os_name }}"
+        organizations:
+          - "{{ satellite_organization }}"
+        locations:
+          - "{{ satellite_location }}"
+        state: present
+      no_log: true
+
+    - name: Associate template as default provision template for the OS
+      redhat.satellite.os_default_template:
+        server_url: "{{ satellite_server_url }}"
+        username: "{{ satellite_username }}"
+        password: "{{ satellite_password }}"
+        validate_certs: "{{ satellite_validate_certs }}"
+        operatingsystem: "{{ os_name }}"
+        template_kind: "provision"
+        provisioning_template: "{{ pt_name }}"
+        state: present
+      no_log: true
+
+    - name: Ensure Host Group for RHEL 10 bootc CIS FIPS
+      redhat.satellite.hostgroup:
+        server_url: "{{ satellite_server_url }}"
+        username: "{{ satellite_username }}"
+        password: "{{ satellite_password }}"
+        validate_certs: "{{ satellite_validate_certs }}"
+        name: "{{ hostgroup_name }}"
+        organization: "{{ satellite_organization }}"
+        locations:
+          - "{{ satellite_location }}"
+        architecture: "{{ architecture }}"
+        operatingsystem: "{{ os_name }}"
+        parameters:
+          - name: "{{ ostreecontainer_param }}"
+            value: "{{ image_full }}"
+          - name: "registry_host"
+            value: "{{ registry_url }}"
+          # registry_auth_b64 should be set as a hidden parameter in UI or via
+          # a separate vault-backed task; do not commit the secret in git.
+        state: present
+      no_log: true
+
+    - name: Guidance for registry auth host parameter
+      ansible.builtin.debug:
+        msg: >
+          Set Host Group or Host parameter 'registry_auth_b64' (hidden) to the
+          base64(user:token) value for {{ registry_url }}. The Kickstart %pre
+          block writes /etc/ostree/auth.json so Anaconda can pull {{ image_full }}.

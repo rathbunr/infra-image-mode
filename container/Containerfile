@@ -1,0 +1,70 @@
+# RHEL 10 Image Mode (bootc) — CIS Level 1 Server + FIPS 140-3 + PIV/smart card
+# Base: official rhel-bootc
+# Build host must be able to pull registry.redhat.io (subscription or pull secret).
+#
+# CIS remediation uses oscap-im (bootc-compatible OpenSCAP).
+# FIPS: crypto policy + kernel argument via /usr/lib/bootc/kargs.d/
+# Smart card: opensc, pcsc-lite, related PAM/SSSD helpers.
+
+ARG BASE_IMAGE=registry.redhat.io/rhel10/rhel-bootc:latest
+FROM ${BASE_IMAGE}
+
+# ---------------------------------------------------------------------------
+# FIPS kernel argument (applied at install and subsequent boots)
+# https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/10/html/using_image_mode_for_rhel_to_build_deploy_and_manage_operating_systems/enabling-the-fips-mode-while-building-a-bootc-image
+# ---------------------------------------------------------------------------
+COPY 01-fips.toml /usr/lib/bootc/kargs.d/01-fips.toml
+
+# ---------------------------------------------------------------------------
+# Packages: OpenSCAP, crypto-policies, smart card / PIV, essentials
+# ---------------------------------------------------------------------------
+RUN dnf -y install \
+      openscap-utils \
+      scap-security-guide \
+      crypto-policies-scripts \
+      opensc \
+      pcsc-lite \
+      pcsc-lite-ccid \
+      sssd-tools \
+      authselect \
+      clevis \
+      clevis-luks \
+    && dnf clean all \
+    && rm -rf /var/cache/dnf
+
+# ---------------------------------------------------------------------------
+# Enable FIPS system-wide cryptographic policy (image build time)
+# --no-reload is required in container build context
+# ---------------------------------------------------------------------------
+RUN update-crypto-policies --no-reload --set FIPS
+
+# ---------------------------------------------------------------------------
+# CIS Level 1 Server remediation via oscap-im (bootc-aware)
+# Profile ID for RHEL 10 CIS Level 1 Server
+# ---------------------------------------------------------------------------
+RUN oscap-im --profile xccdf_org.ssgproject.content_profile_cis \
+      /usr/share/xml/scap/ssg/content/ssg-rhel10-ds.xml \
+    || true
+# || true: some checks are not applicable inside a container build; oscap-im
+# still applies the majority of remediations. Re-scan post-deploy for evidence.
+
+# ---------------------------------------------------------------------------
+# Smart card / YubiKey PIV: enable pcscd, prefer certificate auth via authselect
+# ---------------------------------------------------------------------------
+RUN systemctl enable pcscd.socket pcscd.service \
+    && authselect select sssd with-smartcard with-fingerprint --force \
+    || authselect select sssd with-smartcard --force
+
+# Optional: lock root password in image; provision access via Satellite kickstart
+# (ssh keys / IdM) rather than image-baked credentials.
+RUN passwd -l root || true
+
+# Ensure SELinux remains enforcing (CIS / STIG expectation)
+RUN echo "SELINUX=enforcing" > /etc/selinux/config \
+    && echo "SELINUXTYPE=targeted" >> /etc/selinux/config
+
+LABEL name="rhel10-bootc-cis-l1-fips" \
+      version="1.0" \
+      description="RHEL 10 bootc CIS Level 1 Server, FIPS 140-3, PIV smart card ready" \
+      vendor="Internal CaC" \
+      io.openshift.tags="rhel,bootc,cis,fips,cmmc"

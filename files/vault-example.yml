@@ -1,0 +1,7 @@
+---
+# ansible-vault encrypt files/vault-example.yml
+registry_username: "robot$push"
+registry_password: "CHANGE_ME"
+satellite_password: "CHANGE_ME"
+# Optional: pre-computed auth field for Kickstart (base64 of user:token)
+# registry_auth_b64: "dXNlcjp0b2tlbg=="
